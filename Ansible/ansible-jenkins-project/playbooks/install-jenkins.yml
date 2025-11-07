@@ -1,0 +1,79 @@
+---
+- name: Installation de Jenkins, Java 21 et Git
+  hosts: all  # Ciblez vos serveurs ici (ex: jenkins_servers)
+  become: yes # Nécessaire pour les commandes apt et l'installation
+
+  vars:
+    jenkins_keyring: /usr/share/keyrings/jenkins-keyring.asc
+
+  tasks:
+    # 1. apt update
+    - name: 1. Mettre à jour le cache apt (apt update)
+      ansible.builtin.apt:
+        update_cache: yes
+      changed_when: false  # Ne pas marquer comme "changé" juste pour le cache
+
+    # 2. Installer Java, Git et les prérequis
+    - name: 2. Installer OpenJDK 21, Git et les prérequis (curl, gnupg)
+      ansible.builtin.apt:
+        name:
+          - openjdk-21-jdk
+          - git
+          - curl
+          - gnupg            # gpg/apt-key supprimés → utiliser gnupg
+          - ca-certificates
+          - apt-transport-https
+        state: present
+
+    # 3a. Télécharger la clé GPG officielle de Jenkins
+    - name: 3a. Ajouter la clé GPG officielle de Jenkins
+      ansible.builtin.get_url:
+        url: https://pkg.jenkins.io/debian-stable/jenkins.io-2023.key
+        dest: "{{ jenkins_keyring }}"
+        mode: '0644'
+        force: true
+
+    # 3b. Déclarer le dépôt Jenkins sans apt-key (format deb822)
+    - name: 3b. Ajouter le dépôt Jenkins à APT
+      ansible.builtin.deb822_repository:
+        name: jenkins
+        types: [deb]
+        uris: https://pkg.jenkins.io/debian-stable
+        suites: [binary]
+        components: []
+        signed_by: "{{ jenkins_keyring }}"
+        state: present
+
+    # 4. Mettre à jour le cache après ajout du dépôt
+    - name: 4. Mettre à jour le cache apt après ajout du dépôt Jenkins
+      ansible.builtin.apt:
+        update_cache: yes
+
+    # 5. Installer Jenkins
+    - name: 5. Installer Jenkins
+      ansible.builtin.apt:
+        name: jenkins
+        state: present
+
+    # 6. Attendre que Jenkins génère le mot de passe initial
+    - name: 6. Attendre que Jenkins crée le mot de passe initial
+      ansible.builtin.wait_for:
+        path: /var/lib/jenkins/secrets/initialAdminPassword
+        timeout: 120
+        delay: 5
+
+    # 7. Récupérer le mot de passe initial
+    - name: 7. Récupérer le mot de passe initial
+      ansible.builtin.command: cat /var/lib/jenkins/secrets/initialAdminPassword
+      register: jenkins_password_output
+      changed_when: false
+
+    # 8. Afficher le mot de passe
+    - name: 8. Afficher le mot de passe initial
+      ansible.builtin.debug:
+        msg: "Mot de passe Jenkins : {{ jenkins_password_output.stdout }}"
+
+    # 9. Afficher l’URL d’accès
+    - name: 9. Afficher le lien d'accès à Jenkins
+      ansible.builtin.debug:
+        msg: "Accès Jenkins : http://{{ ansible_host | default(inventory_hostname) }}:8080"

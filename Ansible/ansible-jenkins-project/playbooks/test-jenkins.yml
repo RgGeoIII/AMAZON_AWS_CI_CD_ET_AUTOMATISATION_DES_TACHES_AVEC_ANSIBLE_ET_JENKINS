@@ -1,0 +1,215 @@
+---
+# playbooks/test-jenkins.yml
+# Tests de validation après installation
+
+- name: Tests de validation Jenkins
+  hosts: jenkins
+  become: yes
+  gather_facts: yes
+  
+  tasks:
+    # ==========================================
+    # TEST 1 : VÉRIFICATION JAVA
+    # ==========================================
+    - name: Test - Version Java
+      command: java -version
+      register: java_test
+      changed_when: false
+      failed_when: false
+      tags: [test, java]
+    
+    - name: Valider Java 21
+      assert:
+        that:
+          - java_test.rc == 0
+          - "'openjdk version \"21' in java_test.stderr or 'openjdk 21' in java_test.stderr"
+        fail_msg: " Java 21 n'est pas installé correctement"
+        success_msg: " Java 21 est correctement installé"
+      tags: [test, java]
+    
+    # ==========================================
+    # TEST 2 : VÉRIFICATION GIT
+    # ==========================================
+    - name: Test - Version Git
+      command: git --version
+      register: git_test
+      changed_when: false
+      failed_when: false
+      tags: [test, git]
+    
+    - name: Valider Git
+      assert:
+        that:
+          - git_test.rc == 0
+          - "'git version' in git_test.stdout"
+        fail_msg: " Git n'est pas installé"
+        success_msg: "Git est correctement installé"
+      tags: [test, git]
+    
+    # ==========================================
+    # TEST 3 : VÉRIFICATION JENKINS SERVICE
+    # ==========================================
+    - name: Test - Statut du service Jenkins
+      systemd:
+        name: jenkins
+      register: jenkins_service
+      tags: [test, jenkins]
+    
+    - name: Valider le service Jenkins
+      assert:
+        that:
+          - jenkins_service.status.ActiveState == "active"
+          - jenkins_service.status.SubState == "running"
+        fail_msg: " Le service Jenkins n'est pas actif"
+        success_msg: " Le service Jenkins est actif et en cours d'exécution"
+      tags: [test, jenkins]
+    
+    # ==========================================
+    # TEST 4 : VÉRIFICATION PORT JENKINS
+    # ==========================================
+    - name: Test - Port Jenkins en écoute
+      wait_for:
+        port: "{{ jenkins_http_port | default(8080) }}"
+        host: 127.0.0.1
+        timeout: 10
+      register: port_test
+      ignore_errors: yes
+      tags: [test, jenkins, port]
+    
+    - name: Valider le port Jenkins
+      assert:
+        that:
+          - port_test is succeeded
+        fail_msg: " Jenkins n'écoute pas sur le port {{ jenkins_http_port | default(8080) }}"
+        success_msg: " Jenkins écoute sur le port {{ jenkins_http_port | default(8080) }}"
+      tags: [test, jenkins, port]
+    
+    # ==========================================
+    # TEST 5 : VÉRIFICATION HTTP JENKINS
+    # ==========================================
+    - name: Test - Accès HTTP à Jenkins
+      uri:
+        url: "http://127.0.0.1:{{ jenkins_http_port | default(8080) }}"
+        status_code: [200, 403]
+        timeout: 10
+      register: http_test
+      ignore_errors: yes
+      tags: [test, jenkins, http]
+    
+    - name: Valider l'accès HTTP
+      assert:
+        that:
+          - http_test is succeeded
+          - http_test.status in [200, 403]
+        fail_msg: " L'interface web Jenkins n'est pas accessible"
+        success_msg: " L'interface web Jenkins est accessible"
+      tags: [test, jenkins, http]
+    
+    # ==========================================
+    # TEST 6 : VÉRIFICATION DOCKER (SI INSTALLÉ)
+    # ==========================================
+    - name: Test - Docker installé
+      command: docker --version
+      register: docker_test
+      changed_when: false
+      failed_when: false
+      when: install_docker | default(true)
+      tags: [test, docker]
+    
+    - name: Valider Docker
+      assert:
+        that:
+          - docker_test.rc == 0
+          - "'Docker version' in docker_test.stdout"
+        fail_msg: " Docker n'est pas installé correctement"
+        success_msg: " Docker est correctement installé"
+      when: install_docker | default(true)
+      tags: [test, docker]
+    
+    # ==========================================
+    # TEST 7 : FICHIER MOT DE PASSE INITIAL
+    # ==========================================
+    - name: Test - Présence du fichier de mot de passe initial
+      stat:
+        path: /var/lib/jenkins/secrets/initialAdminPassword
+      register: password_file
+      tags: [test, jenkins, password]
+    
+    - name: Valider le fichier de mot de passe
+      assert:
+        that:
+          - password_file.stat.exists
+          - password_file.stat.size > 0
+        fail_msg: " Le fichier de mot de passe initial n'existe pas"
+        success_msg: " Le fichier de mot de passe initial est présent"
+      tags: [test, jenkins, password]
+    
+    # ==========================================
+    # TEST 8 : VÉRIFICATION MÉMOIRE
+    # ==========================================
+    - name: Test - Mémoire disponible
+      shell: free -m | grep Mem | awk '{print $7}'
+      register: available_memory
+      changed_when: false
+      tags: [test, system]
+    
+    - name: Valider la mémoire disponible
+      assert:
+        that:
+          - available_memory.stdout | int > 100
+        fail_msg: "Mémoire disponible faible : {{ available_memory.stdout }} MB"
+        success_msg: "Mémoire disponible suffisante : {{ available_memory.stdout }} MB"
+      tags: [test, system]
+    
+    # ==========================================
+    # TEST 9 : VÉRIFICATION ESPACE DISQUE
+    # ==========================================
+    - name: Test - Espace disque disponible
+      shell: df -h / | tail -1 | awk '{print $4}' | sed 's/G//'
+      register: disk_space
+      changed_when: false
+      tags: [test, system]
+    
+    - name: Valider l'espace disque
+      assert:
+        that:
+          - disk_space.stdout | float > 1.0
+        fail_msg: " Espace disque faible : {{ disk_space.stdout }}G"
+        success_msg: "Espace disque suffisant : {{ disk_space.stdout }}G"
+      ignore_errors: yes
+      tags: [test, system]
+    
+    # ==========================================
+    # RÉSUMÉ DES TESTS
+    # ==========================================
+    - name: Collecter les résultats des tests
+      set_fact:
+        test_results:
+          - "Java 21 :  Installé"
+          - "Git :  Installé"
+          - "Jenkins Service :  Actif"
+          - "Port {{ jenkins_http_port | default(8080) }} :  En écoute"
+          - "Interface Web :  Accessible"
+          - "Docker : {{ 'Installé' if (install_docker | default(true)) else ' Skipped' }}"
+          - "Mot de passe initial :  Disponible"
+      tags: [test, summary]
+    
+    - name: Afficher le résumé des tests
+      debug:
+        msg:
+          - "========================================="
+          - "📊RÉSUMÉ DES TESTS"
+          - "========================================="
+          - "{{ test_results }}"
+          - "========================================="
+          - ""
+          - " Tous les tests sont passés avec succès !"
+          - ""
+          - " Accès Jenkins :"
+          - "   URL externe : http://{{ public_ip | default(ansible_default_ipv4.address) }}:{{ jenkins_http_port | default(8080) }}"
+          - "   URL locale : http://{{ ansible_default_ipv4.address }}:{{ jenkins_http_port | default(8080) }}"
+          - ""
+          - " Pour récupérer le mot de passe :"
+          - "   sudo cat /var/lib/jenkins/secrets/initialAdminPassword"
+          - "========================================="
+      tags: [test, summary, always]⏎    

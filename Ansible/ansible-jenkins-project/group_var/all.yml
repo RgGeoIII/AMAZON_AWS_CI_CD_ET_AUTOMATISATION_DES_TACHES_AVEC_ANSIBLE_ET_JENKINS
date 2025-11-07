@@ -1,0 +1,93 @@
+---
+# Variables globales pour tous les hosts
+# Mise à jour selon la documentation officielle Jenkins 2024
+
+# Configuration système
+timezone: America/New_York
+locale: en_US.UTF-8
+
+# Configuration Java (Mise à jour vers Java 21 comme recommandé)
+java_version: 21
+java_packages:
+  - fontconfig           # Requis pour Java 21
+  - openjdk-21-jre      # Version recommandée par Jenkins
+  # Note: On n'installe que le JRE, pas le JDK complet
+
+# Configuration Git (sera installé sur jenkins-srv)
+git_packages:
+  - git
+  - git-lfs
+  - git-flow
+
+# Configuration Jenkins (Mise à jour avec la nouvelle méthode)
+jenkins_repo_key_url: https://pkg.jenkins.io/debian-stable/jenkins.io-2023.key
+jenkins_keyring_path: /etc/apt/keyrings/jenkins-keyring.asc
+jenkins_repo_line: "deb [signed-by=/etc/apt/keyrings/jenkins-keyring.asc] https://pkg.jenkins.io/debian-stable binary/"
+jenkins_sources_list: /etc/apt/sources.list.d/jenkins.list
+
+# Configuration Jenkins service
+jenkins_http_port: 8080
+jenkins_admin_username: admin
+jenkins_java_options: "-Djava.awt.headless=true -Djenkins.install.runSetupWizard=false"
+jenkins_home: /var/lib/jenkins
+
+# Plugins Jenkins essentiels
+jenkins_plugins:
+  - git
+  - github
+  - workflow-aggregator  # Pipeline
+  - docker-workflow
+  - credentials-binding
+  - ssh-slaves
+  - timestamper
+  - ws-cleanup
+  - ant
+  - gradle
+  - maven-plugin
+  - pipeline-stage-view
+  - build-timeout
+  - email-ext
+  - mailer
+  - slack
+  - blueocean
+  - configuration-as-code  # Pour JCasC
+
+# Configuration Docker (optionnel)
+install_docker: true
+docker_users:
+  - admin
+  - jenkins
+
+# Outils de développement additionnels
+dev_tools:
+  - curl
+  - wget
+  - vim
+  - nano
+  - unzip
+  - zip
+  - tree
+  - jq
+
+# Monitoring
+enable_monitoring: true
+monitoring_tools:
+  - htop
+  - nethogs
+  - iotop
+  - ncdu
+  - dstat
+
+# Configuration projet
+project_name: jenkins-deployment
+env_name: production  # Pas 'environment' qui est réservé
+deployment_env: prod
+
+# Sécurité
+enable_firewall: false  # UFW peut bloquer sur AWS
+enable_fail2ban: false
+ssh_port: 22
+
+# Backup
+enable_backup: false
+backup_dir: /opt/backups

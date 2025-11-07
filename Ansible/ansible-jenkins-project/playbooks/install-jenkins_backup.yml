@@ -1,0 +1,307 @@
+---
+# playbooks/install-jenkins.yml
+# Version corrigée - Installation Jenkins avec Java 21
+
+- name: Installation complète de Jenkins sur Ubuntu/Debian
+  hosts: all
+  become: yes
+  gather_facts: yes
+  
+  vars:
+    jenkins_initial_admin_password_file: /var/lib/jenkins/secrets/initialAdminPassword
+    
+  pre_tasks:
+    - name: Afficher les informations du serveur
+      debug:
+        msg:
+          - "========================================="
+          - "Serveur: {{ ansible_hostname }}"
+          - "IP Privée: {{ ansible_default_ipv4.address }}"
+          - "IP Publique: {{ public_ip | default('N/A') }}"
+          - "OS: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+          - "Architecture: {{ ansible_architecture }}"
+          - "CPU: {{ ansible_processor_vcpus }} cores"
+          - "RAM: {{ ansible_memtotal_mb }} MB"
+          - "========================================="
+      tags: [always]
+    
+  tasks:
+    # ==========================================
+    # ÉTAPE 1 : MISE À JOUR DU SYSTÈME
+    # ==========================================
+    - name: Mise à jour du cache APT
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      tags: [system, update]
+    
+    # ==========================================
+    # ÉTAPE 2 : INSTALLATION DE JAVA 21
+    # ==========================================
+    - name: Installer Java 21 et ses dépendances
+      apt:
+        name:
+          - fontconfig
+          - openjdk-21-jre
+        state: present
+        update_cache: yes
+      tags: [java]
+    
+    - name: Vérifier l'installation de Java
+      command: java -version
+      register: java_version_output
+      changed_when: false
+      tags: [java, verify]
+    
+    - name: Afficher la version de Java
+      debug:
+        msg: 
+          - "Java installé avec succès !"
+          - "Version: {{ java_version_output.stderr_lines[0] if java_version_output.stderr_lines else 'Non disponible' }}"
+      tags: [java, verify]
+    
+    # ==========================================
+    # ÉTAPE 3 : INSTALLATION DE GIT
+    # ==========================================
+    - name: Installer Git et outils associés
+      apt:
+        name:
+          - git
+          - git-lfs
+        state: present
+      tags: [git]
+    
+    - name: Vérifier la version de Git
+      command: git --version
+      register: git_version_output
+      changed_when: false
+      tags: [git, verify]
+    
+    - name: Afficher la version de Git
+      debug:
+        msg: "Git installé : {{ git_version_output.stdout }}"
+      tags: [git, verify]
+    
+    # ==========================================
+    # ÉTAPE 4 : INSTALLATION DES OUTILS DE DEV
+    # ==========================================
+    - name: Installer les outils de développement
+      apt:
+        name:
+          - curl
+          - wget
+          - vim
+          - nano
+          - unzip
+          - zip
+        state: present
+      tags: [tools]
+    
+    # ==========================================
+    # ÉTAPE 5 : CONFIGURATION DU DÉPÔT JENKINS
+    # ==========================================
+    - name: Créer le répertoire pour les keyrings APT
+      file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+      tags: [jenkins, repo]
+    
+    - name: Télécharger la clé GPG de Jenkins
+      get_url:
+        url: "https://pkg.jenkins.io/debian-stable/jenkins.io-2023.key"
+        dest: "/etc/apt/keyrings/jenkins-keyring.asc"
+        mode: '0644'
+      tags: [jenkins, repo]
+    
+    - name: Ajouter le dépôt Jenkins
+      copy:
+        content: "deb [signed-by=/etc/apt/keyrings/jenkins-keyring.asc] https://pkg.jenkins.io/debian-stable binary/"
+        dest: "/etc/apt/sources.list.d/jenkins.list"
+        mode: '0644'
+      tags: [jenkins, repo]
+    
+    - name: Mettre à jour le cache APT après ajout du dépôt
+      apt:
+        update_cache: yes
+      tags: [jenkins, repo]
+    
+    # ==========================================
+    # ÉTAPE 6 : INSTALLATION DE JENKINS
+    # ==========================================
+    - name: Installer Jenkins
+      apt:
+        name: jenkins
+        state: present
+      register: jenkins_installed
+      tags: [jenkins, install]
+    
+    - name: Créer le répertoire de configuration Jenkins service
+      file:
+        path: /etc/systemd/system/jenkins.service.d
+        state: directory
+        mode: '0755'
+      tags: [jenkins, config]
+    
+    - name: Configurer les options Java pour Jenkins
+      copy:
+        content: |
+          [Service]
+          Environment="JAVA_OPTS=-Djava.awt.headless=true -Djenkins.install.runSetupWizard=false"
+          Environment="JENKINS_PORT={{ jenkins_http_port | default(8080) }}"
+        dest: /etc/systemd/system/jenkins.service.d/override.conf
+        mode: '0644'
+      notify: restart jenkins
+      tags: [jenkins, config]
+    
+    # ==========================================
+    # ÉTAPE 7 : DÉMARRAGE DE JENKINS
+    # ==========================================
+    - name: Recharger systemd
+      systemd:
+        daemon_reload: yes
+      tags: [jenkins, service]
+    
+    - name: Démarrer et activer Jenkins
+      systemd:
+        name: jenkins
+        state: started
+        enabled: yes
+      tags: [jenkins, service]
+    
+    - name: Attendre que Jenkins soit prêt
+      wait_for:
+        port: "{{ jenkins_http_port | default(8080) }}"
+        host: "{{ ansible_default_ipv4.address }}"
+        delay: 20
+        timeout: 120
+      tags: [jenkins, service]
+    
+    # ==========================================
+    # ÉTAPE 8 : RÉCUPÉRATION DU MOT DE PASSE
+    # ==========================================
+    - name: Attendre que le fichier de mot de passe soit créé
+      wait_for:
+        path: "{{ jenkins_initial_admin_password_file }}"
+        state: present
+        timeout: 60
+      tags: [jenkins, password]
+    
+    - name: Lire le mot de passe administrateur initial
+      slurp:
+        src: "{{ jenkins_initial_admin_password_file }}"
+      register: admin_password
+      tags: [jenkins, password]
+    
+    - name: Afficher le mot de passe
+      debug:
+        msg: "Mot de passe initial Jenkins : {{ admin_password.content | b64decode | trim }}"
+      tags: [jenkins, password]
+    
+    # ==========================================
+    # ÉTAPE 9 : INSTALLATION DE DOCKER (OPTIONNEL)
+    # ==========================================
+    - name: Installer les prérequis Docker
+      apt:
+        name:
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+        state: present
+      when: install_docker | default(true)
+      tags: [docker]
+    
+    - name: Ajouter la clé GPG Docker
+      get_url:
+        url: "https://download.docker.com/linux/{{ ansible_distribution | lower }}/gpg"
+        dest: /etc/apt/keyrings/docker.asc
+        mode: '0644'
+      when: install_docker | default(true)
+      tags: [docker]
+    
+    - name: Ajouter le dépôt Docker
+      apt_repository:
+        repo: "deb [arch={{ ansible_architecture | replace('x86_64', 'amd64') }} signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/{{ ansible_distribution | lower }} {{ ansible_distribution_release }} stable"
+        state: present
+        filename: docker
+      when: install_docker | default(true)
+      tags: [docker]
+    
+    - name: Installer Docker
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+        state: present
+        update_cache: yes
+      when: install_docker | default(true)
+      tags: [docker]
+    
+    - name: Ajouter les utilisateurs au groupe docker
+      user:
+        name: "{{ item }}"
+        groups: docker
+        append: yes
+      loop:
+        - admin
+        - jenkins
+      when: install_docker | default(true)
+      ignore_errors: yes
+      tags: [docker]
+    
+    - name: Démarrer et activer Docker
+      systemd:
+        name: docker
+        state: started
+        enabled: yes
+      when: install_docker | default(true)
+      tags: [docker]
+    
+    # ==========================================
+    # ÉTAPE 10 : OUTILS DE MONITORING
+    # ==========================================
+    - name: Installer les outils de monitoring
+      apt:
+        name:
+          - htop
+          - nethogs
+          - iotop
+        state: present
+      when: enable_monitoring | default(true)
+      ignore_errors: yes
+      tags: [monitoring]
+    
+  handlers:
+    - name: restart jenkins
+      systemd:
+        name: jenkins
+        state: restarted
+        daemon_reload: yes
+    
+  post_tasks:
+    - name: Afficher les informations d'accès
+      debug:
+        msg:
+          - "========================================="
+          - "🎉 INSTALLATION TERMINÉE AVEC SUCCÈS !"
+          - "========================================="
+          - ""
+          - "📌 Accès Jenkins :"
+          - "   URL : http://{{ public_ip | default(ansible_default_ipv4.address) }}:{{ jenkins_http_port | default(8080) }}"
+          - "   Username : admin"
+          - "   Password : {{ admin_password.content | b64decode | trim if admin_password is defined else 'Voir le fichier /var/lib/jenkins/secrets/initialAdminPassword' }}"
+          - ""
+          - "📋 Versions installées :"
+          - "   Java : OpenJDK 21"
+          - "   Jenkins : Latest LTS"
+          - "   Git : {{ git_version_output.stdout if git_version_output is defined else 'Installé' }}"
+          - ""
+          - "📝 Prochaines étapes :"
+          - "   1. Accédez à Jenkins via votre navigateur"
+          - "   2. Utilisez le mot de passe initial"
+          - "   3. Installez les plugins suggérés"
+          - "   4. Créez votre utilisateur admin"
+          - "========================================="
+      tags: [always]

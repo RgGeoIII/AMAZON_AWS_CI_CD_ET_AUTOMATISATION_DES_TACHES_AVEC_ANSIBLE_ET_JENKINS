@@ -1,0 +1,69 @@
+---
+- name: Installation et configuration de Jenkins
+  hosts: jenkins
+  become: yes
+  vars:
+    jenkins_http_port: 8080
+    jenkins_repo_key_url: https://pkg.jenkins.io/debian-stable/jenkins.io-2023.key
+    jenkins_repo_deb_line: "deb https://pkg.jenkins.io/debian-stable binary/"
+    jenkins_java_package: openjdk-17-jdk
+
+  pre_tasks:
+    - name: Mettre à jour la liste des paquets (Debian/Ubuntu)
+      apt:
+        update_cache: yes
+      when: ansible_os_family == "Debian"
+
+  tasks:
+    - name: Installer Java (pré-requis Jenkins)
+      apt:
+        name: "{{ jenkins_java_package }}"
+        state: present
+
+    - name: Installer dépendances (gnupg, ca-certificates, etc.)
+      apt:
+        name:
+          - gnupg
+          - ca-certificates
+          - apt-transport-https
+        state: present
+
+    - name: Ajouter la clé GPG du dépôt Jenkins
+      ansible.builtin.get_url:
+        url: "{{ jenkins_repo_key_url }}"
+        dest: /usr/share/keyrings/jenkins-keyring.asc
+        mode: '0644'
+
+    - name: Ajouter le dépôt Jenkins dans sources.list.d
+      copy:
+        dest: /etc/apt/sources.list.d/jenkins.list
+        content: "deb [signed-by=/usr/share/keyrings/jenkins-keyring.asc] https://pkg.jenkins.io/debian-stable binary/\n"
+        mode: '0644'
+
+    - name: Mettre à jour la liste des paquets après ajout du dépôt Jenkins
+      apt:
+        update_cache: yes
+
+    - name: Installer Jenkins
+      apt:
+        name: jenkins
+        state: present
+
+    - name: S'assurer que Jenkins est démarré et activé au boot
+      service:
+        name: jenkins
+        state: started
+        enabled: yes
+
+    - name: Configurer le port HTTP de Jenkins (optionnel)
+      lineinfile:
+        path: /etc/default/jenkins
+        regexp: '^HTTP_PORT='
+        line: "HTTP_PORT={{ jenkins_http_port }}"
+      notify: Restart Jenkins
+
+  handlers:
+    - name: Restart Jenkins
+      service:
+        name: jenkins
+        state: restarted
