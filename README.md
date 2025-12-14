@@ -108,15 +108,24 @@ Ce projet pédagogique présente une **approche pratique** pour mettre en place 
 
 ---
 
-## 👨‍💻 Auteur
+## 🤖 Auteur
 
-**Geoffrey Rouvel**  **Xavier ROCHER** **Ludovic MANGENOT**
-
+**Geoffrey ROUVEL**  
 Étudiant à l’IPSSI | Administrateur Systèmes & Réseaux  
 GitHub : [@RgGeolll](https://github.com/RgGeolll)
 
 ---
 
-## 🤝 Contribution
+## 🤖 Collaborateur
 
-1. Fork → clone → `git checkout
+**Xavier ROCHER**  
+Étudiant à l’IPSSI | Administrateur Systèmes & Réseaux  
+GitHub : [@Xavier-ROCHER](https://github.com/Xavier-ROCHER)
+
+**Ludovic MANGENOT**  
+Étudiant à l’IPSSI | Administrateur Systèmes & Réseaux
+
+---
+
+🎓 Projet réalisé dans le cadre du module **AMAZON AWS : CI / CD ET AUTOMATISATION DES TACHES AVEC ANSIBLE ET JENKINS
+** – Mastère Cybersécurité & Cloudcomputing.
